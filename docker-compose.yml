@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: counter
+      POSTGRES_PASSWORD: counter
+      POSTGRES_DB: counterdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U counter -d counterdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg2://counter:counter@db:5432/counterdb
+      # Sumber CCTV: path file (mis. /media/traffic.mp4), URL HLS .m3u8, RTSP, atau URL YouTube.
+      VIDEO_SOURCE: "https://cctv-dishub.tangerangkab.go.id/storage/video/01jsrepbfdrenxw1k42nxw94c5/01jsrepbfdrenxw1k42nxw94c5.m3u8?t=1781874586126"
+      MODEL: "best_vehicle_sahi.pt"   # model SAHI fine-tuned (car/motorcycle/bus/truck)
+      CONF: "0.25"
+      IMGSZ: "640"          # resolusi penuh → deteksi objek kecil/jauh lebih baik
+      YT_MAX_HEIGHT: "360"  # batasi resolusi sumber YouTube → stream ringan & mulus
+      DETECT_FPS: "6"       # laju deteksi YOLO (dibatasi agar CPU tersisa untuk tampilan mulus)
+      BUFFER_FRAMES: "150"  # jitter buffer: serap burst HLS agar pemutaran mulus (lebih besar = lebih halus tapi latensi naik)
+      VID_STRIDE: "1"       # (tampilan live menggambar tiap frame; deteksi jalan terpisah)
+      # REFERER: "https://atcs-dishub.bandung.go.id/"
+    volumes:
+      - ./media:/media          # taruh video uji di folder ./media lalu set VIDEO_SOURCE=/media/namafile.mp4
+      - ./models:/app/models:ro  # bobot (.pt) di-mount; tak ikut image krn .dockerignore (mis. best_vehicle_sahi.pt kustom)
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

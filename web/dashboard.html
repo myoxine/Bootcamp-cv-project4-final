@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vehicle & Object Counter — Dashboard</title>
+<style>
+  :root{ --bg:#f5f5f3; --card:#fff; --ink:#1c1c1a; --muted:#6b6a64; --line:#e3e2db;
+         --info:#185fa5; --infobg:#e6f1fb; --danger:#a32d2d; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--ink);
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; }
+  .wrap{ max-width:1200px; margin:0 auto; padding:14px; }
+  .bar,.panel{ background:var(--card); border:1px solid var(--line); border-radius:12px; }
+  .bar{ display:flex; align-items:center; justify-content:space-between; padding:10px 14px; margin-bottom:12px; }
+  .title{ font-size:16px; font-weight:600; }
+  .sub{ font-size:12px; color:var(--muted); }
+  .live{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--danger);
+         background:#fceaea; padding:4px 10px; border-radius:8px; }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--danger); }
+  .top{ display:grid; grid-template-columns:1.75fr 1fr; gap:12px; align-items:stretch; margin-bottom:12px; }
+  .camwrap{ display:flex; flex-direction:column; }
+  .camlbl{ font-size:13px; color:var(--muted); margin-bottom:6px; }
+  .cam{ flex:1; min-height:260px; background:#0d0e12; border-radius:12px; overflow:hidden;
+        display:flex; align-items:center; justify-content:center; }
+  .cam canvas{ width:100%; height:100%; object-fit:contain; display:block; }
+  .panel{ padding:12px; }
+  .ptitle{ font-size:15px; font-weight:600; margin:0 0 10px; }
+  .cards{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .mc{ background:#f1efe8; border-radius:8px; padding:8px 10px; border-left:4px solid transparent; }
+  .mc .lab{ font-size:12px; color:var(--muted); }
+  .mc .num{ font-size:20px; font-weight:600; }
+  /* warna per jenis objek — disamakan dengan kotak deteksi di CCTV */
+  .mc.motor{ border-left-color:#378ADD; } .mc.motor .num{ color:#378ADD; }
+  .mc.mobil{ border-left-color:#1D9E75; } .mc.mobil .num{ color:#1D9E75; }
+  .mc.bus{   border-left-color:#7F77DD; } .mc.bus .num{   color:#7F77DD; }
+  .mc.truk{  border-left-color:#D85A30; } .mc.truk .num{  color:#D85A30; }
+  .mc.total{ background:var(--infobg); border-left-color:var(--info); }
+  .mc.total .lab,.mc.total .num{ color:var(--info); }
+  .tabs{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .legend{ display:flex; flex-wrap:wrap; gap:14px; font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .legend i{ width:16px; height:0; border-top:3px solid; display:inline-block; vertical-align:middle; margin-right:4px; }
+  .chartbox{ position:relative; width:100%; height:230px; }
+  @media(max-width:760px){ .top{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <div>
+      <div class="title">Vehicle &amp; Object Counter</div>
+      <div class="sub" id="src">memuat sumber…</div>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="live"><span class="dot"></span>LIVE</span>
+      <span class="sub" id="clock"></span>
+    </div>
+  </div>
+
+  <div class="top">
+    <div class="camwrap">
+      <div class="camlbl">CCTV</div>
+      <div class="cam"><canvas id="cam" width="640" height="360"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="ptitle">Report</div>
+      <div class="cards">
+        <div class="mc motor"><div class="lab">Motor</div><div class="num" id="c-motor">0</div></div>
+        <div class="mc mobil"><div class="lab">Mobil</div><div class="num" id="c-mobil">0</div></div>
+        <div class="mc bus"><div class="lab">Bus</div><div class="num" id="c-bus">0</div></div>
+        <div class="mc truk"><div class="lab">Truk</div><div class="num" id="c-truk">0</div></div>
+        <div class="mc total"><div class="lab">Total</div><div class="num" id="c-total">0</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="tabs">
+      <span style="font-size:14px; font-weight:600; margin-right:auto;">Jumlah per jam (per tipe objek)</span>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="chartbox"><canvas id="chart"></canvas></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const COLORS = { motor:'#378ADD', mobil:'#1D9E75', bus:'#7F77DD', truk:'#D85A30' };
+const CYCLE = ['#378ADD','#1D9E75','#BA7517','#7F77DD','#D85A30','#888780'];
+const DASH = [[], [6,4], [2,3], [8,3,2,3], [10,4], [4,4]];
+let chart = null;
+
+// --- CCTV via WebSocket -> canvas (hanya gambar frame baru, tanpa duplikat) ---
+const canvas = document.getElementById('cam');
+const ctx = canvas.getContext('2d');
+let drawing = false;
+function connectCam(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = 'blob';
+  ws.onmessage = async (ev)=>{
+    if(drawing) return;            // lewati bila frame sebelumnya belum selesai digambar
+    drawing = true;
+    try{
+      const bmp = await createImageBitmap(ev.data);
+      if(canvas.width !== bmp.width || canvas.height !== bmp.height){
+        canvas.width = bmp.width; canvas.height = bmp.height;
+      }
+      ctx.drawImage(bmp, 0, 0);
+      bmp.close();
+    }catch(e){ /* frame rusak -> abaikan */ }
+    drawing = false;
+  };
+  ws.onclose = ()=> setTimeout(connectCam, 1000);   // auto-reconnect
+  ws.onerror = ()=> ws.close();
+}
+connectCam();
+
+function fmt(n){ return (n||0).toLocaleString('id-ID'); }
+
+async function refreshStats(){
+  try{
+    const r = await fetch('/stats'); const d = await r.json();
+    const pk = d.per_kelas || {};
+    ['motor','mobil','bus','truk'].forEach(k=>{
+      document.getElementById('c-'+k).textContent = fmt(pk[k]||0);
+    });
+    document.getElementById('c-total').textContent = fmt(d.total||0);
+  }catch(e){ /* abaikan saat backend belum siap */ }
+}
+
+async function loadChart(){
+  let d = { labels:[], series:{} };
+  try{ d = await (await fetch('/timeseries?by=tipe')).json(); }catch(e){}
+  const keys = Object.keys(d.series);
+  const datasets = keys.map((k,i)=>({
+    label: k,
+    data: d.series[k],
+    borderColor: COLORS[k]||CYCLE[i%CYCLE.length],
+    borderDash: DASH[['motor','mobil','bus','truk'].indexOf(k)] || DASH[i%DASH.length],
+    borderWidth:2, pointRadius:0, tension:.35
+  }));
+  document.getElementById('legend').innerHTML = datasets.map(ds=>
+    `<span><i style="border-top-color:${ds.borderColor}"></i>${ds.label}</span>`).join('');
+  if(chart) chart.destroy();
+  chart = new Chart(document.getElementById('chart'), {
+    type:'line', data:{ labels:d.labels, datasets },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+      scales:{ x:{ title:{display:true,text:'Jam'}, grid:{display:false} },
+               y:{ beginAtZero:true, title:{display:true,text:'Jumlah'} } } }
+  });
+}
+
+function tick(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString('id-ID'); }
+
+refreshStats(); loadChart(); tick();
+setInterval(refreshStats, 30000);
+setInterval(loadChart, 30000);
+setInterval(tick, 1000);
+fetch('/').then(()=>{ document.getElementById('src').textContent = 'CCTV: ' + (location.host); });
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Bobot YOLO (terunduh otomatis saat dijalankan)
+*.pt
+
+# Database SQLite lokal
+*.db
+
+# Media & artefak hasil
+*.mp4
+output*.mp4
+*_preview.jpg
+diag_*.jpg

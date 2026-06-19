@@ -1,0 +1,8 @@
+ultralytics>=8.1.0
+yt-dlp                 # ekstrak stream dari URL YouTube (live source)
+opencv-python-headless
+fastapi
+uvicorn[standard]
+python-multipart
+sqlalchemy>=2.0
+psycopg2-binary
